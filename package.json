@@ -18,5 +18,8 @@
   "bugs": {
     "url": "https://github.com/muqsith/wiktionary-extraction/issues"
   },
-  "homepage": "https://github.com/muqsith/wiktionary-extraction#readme"
+  "homepage": "https://github.com/muqsith/wiktionary-extraction#readme",
+  "dependencies": {
+    "sax": "^1.2.1"
+  }
 }
