@@ -1,0 +1,22 @@
+{
+  "name": "wiktionary-extraction",
+  "version": "1.0.0",
+  "description": "Extraction of Wiktionary data using Node.js",
+  "main": "index.js",
+  "scripts": {
+    "test": "npm test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/muqsith/wiktionary-extraction.git"
+  },
+  "keywords": [
+    "Wiktionary"
+  ],
+  "author": "muqsith",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/muqsith/wiktionary-extraction/issues"
+  },
+  "homepage": "https://github.com/muqsith/wiktionary-extraction#readme"
+}
