@@ -20,6 +20,12 @@
   },
   "homepage": "https://github.com/muqsith/wiktionary-extraction#readme",
   "dependencies": {
+    "cheerio": "^0.22.0",
+    "config": "^1.24.0",
+    "crc-32": "^1.0.1",
+    "event-stream": "^3.3.4",
+    "mongodb": "^2.2.20",
+    "request": "^2.79.0",
     "sax": "^1.2.1"
   }
 }

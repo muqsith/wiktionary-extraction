@@ -1,0 +1,4 @@
+{
+  "mongodb-url":"mongodb://localhost:27017/enwiktionary",
+  "xml_file":"/home/muqsith/Development/datasets/wiktionary/current/enwiktionary-20170101-pages-articles.xml"
+}
