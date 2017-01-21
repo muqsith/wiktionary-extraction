@@ -18,7 +18,7 @@ MongoClient.connect(config.get('mongodb-url'), (err, db) => {
         .pipe(es.map(function(data, cb){
             if (data && data.length > 1) {
                 let o = JSON.parse(data);
-                o.language = lib.getLanguage(o.title, o.text);
+                o.language = lib.getLanguage(o.text);
                 db.collection('pages').insertOne(o, (err, result) => {
                     if (err) {
                         console.log(err);

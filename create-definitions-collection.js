@@ -75,7 +75,7 @@ MongoClient.connect(config.get('mongodb-url'), (err, db) => {
         .pipe(es.map(function(data, cb){
             if (data && data.length > 1) {
                 let o = JSON.parse(data);
-                o.language = lib.getLanguage(o.title, o.text);
+                o.language = lib.getLanguage(o.text);
                 if (languagesmap[o.language] > 100) {
                     o.text = getFilteredText(o.text);
                     db.collection('filteredpages').insertOne(o, (err, result) => {
