@@ -16,7 +16,8 @@ parseXml().then((result) => {
                     console.log(`Filtered data: ${result.status}`);
                     createTemplatesData().then((result) => {
                         console.log(`Extract Templates data: ${result.status}`);
-                        fetchTemplatesValues().then((result) => {
+                        fetchTemplatesValues('temp/templates.json',
+                            'temp/templates-values.json').then((result) => {
                             console.log(`Fetch Templates data: ${result.status}`);
                         }, ({status, error}) => {
                             console.log('Fetch Templates data: ', status, error);

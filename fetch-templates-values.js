@@ -35,10 +35,10 @@ const parseResponse = function (response) {
     return arr;
 };
 
-function getTotalLinesFromBothFiles() {
+function getTotalLinesFromBothFiles(inputFile, outputFile) {
     return new Promise((resolve, reject) => {
         let result = {inputLines: 0, outputLines: 0};
-        let templatesStream = fs.createReadStream('temp/templates.json', {encoding:'utf8'});
+        let templatesStream = fs.createReadStream(inputFile, {encoding:'utf8'});
         let templateStreamRL = readline.createInterface({input: templatesStream});
         let inputFileLinesCount = 0;
         templateStreamRL.on('line', (line) => {
@@ -51,8 +51,8 @@ function getTotalLinesFromBothFiles() {
 
             result.inputLines = inputFileLinesCount;
 
-            if (fs.existsSync('temp/templates-values.json')) {
-                let templatesValueStream = fs.createReadStream('temp/templates-values.json', {encoding:'utf8'});
+            if (fs.existsSync(outputFile)) {
+                let templatesValueStream = fs.createReadStream(outputFile, {encoding:'utf8'});
                 let templatesValueStreamRL = readline.createInterface({input: templatesValueStream});
                 let outputFileLinesCount = 0;
                 templatesValueStreamRL.on('line', (line) => {
@@ -71,29 +71,30 @@ function getTotalLinesFromBothFiles() {
             }
         });
     });
-}
+};
 
-function fetchTemplatesValues() {
+function fetchTemplatesValues(inputFile, outputFile, docsPerRequest) {
     return new Promise((resolve, reject) => {
-        getTotalLinesFromBothFiles().then( (fileLinesObject) => {
+        getTotalLinesFromBothFiles(inputFile, outputFile).then( (fileLinesObject) => {
+            console.log(fileLinesObject);
             if (fileLinesObject.inputLines > fileLinesObject.outputLines) {
                 let beginCount = 0;
-                let max = 500;
+                let max = (docsPerRequest) ? docsPerRequest : 500;
                 let writeStream = undefined;
                 if (fileLinesObject.outputLines > 2) {
                     beginCount = fileLinesObject.outputLines - 2;
                     if ((fileLinesObject.inputLines - fileLinesObject.outputLines) < max) {
                         max = fileLinesObject.inputLines - fileLinesObject.outputLines;
                     }
-                    writeStream = fs.createWriteStream('temp/templates-values.json', {encoding:'utf8', flags: 'a'});
+                    writeStream = fs.createWriteStream(outputFile, {encoding:'utf8', flags: 'a'});
                 } else {
-                    writeStream = fs.createWriteStream('temp/templates-values.json', {encoding:'utf8'});
+                    writeStream = fs.createWriteStream(outputFile, {encoding:'utf8'});
                 }
                 let totalLinesCount = 0;
-                console.log(`Begining from line ${beginCount} in temp/templates.json`);
+                console.log(`Begining from line ${beginCount} in ${inputFile}`);
                 let count = 0;
                 let requestData = '';
-                let readStream = fs.createReadStream('temp/templates.json', {encoding:'utf8'});
+                let readStream = fs.createReadStream(inputFile, {encoding:'utf8'});
 
                 let rl = readline.createInterface({input: readStream});
 
@@ -107,70 +108,72 @@ function fetchTemplatesValues() {
                     }
                 });
 
-                rl.on('close', (err) => {
-                    client.quit();
-                    if (err) {
-                        return reject({status: promisestatus.fail, 'error': err});
-                    } else {
-                        resolve({status: promisestatus.success});
-                    }
-                });
-                rl.on('line', (line) => {
-                    totalLinesCount += 1;
-                    if (totalLinesCount >= beginCount) {
-                        count += 1;
-                        if (count >= max) {
-                            rl.pause();
-                            if (!requestMade) {
-                                requestMade = true;
-                                setTimeout( () => {
-                                    wikiConnector(requestData, (err, response) => {
-                                        if (err) {
-                                            client.quit();
-                                            return reject({status: promisestatus.fail, 'error': err});
-                                        } else if (response) {
-                                            response = '<html><body>'+response+'</body></html>';
-                                            let result = parseResponse(response);
-                                            console.log(`Result length ${result.length}`);
-                                            const cleanupAndProceed = function() {
-                                                client.flushall(() => {
-                                                    requestData = '';
-                                                    count = 0;
-                                                    requestMade = false;
-                                                    rl.resume();
-                                                });
-                                            };
-
-                                            let i=0;
-                                            const processResult = function(obj) {
-                                                client.get(obj.checksum, (err, val) => {
-                                                    if (err) {
-                                                        client.quit();
-                                                        return reject({status: promisestatus.fail, 'error': err});
-                                                    } else if (val) {
-                                                        let templateObject = JSON.parse(val);
-                                                        templateObject.value = obj.html;
-
-                                                        writeStream.write(JSON.stringify(templateObject)+'\n');
-                                                        i += 1;
-                                                        if (i < result.length) {
-                                                            processResult(result[i]);
-                                                        } else {
-                                                            return cleanupAndProceed();
-                                                        }
-                                                    }
-                                                });
-                                            }
-                                            processResult(result[i]);
-                                        }
-                                    });
-                                }, 500);
-                            }
+                client.flushall(() => {
+                    console.log('Flushed redis');
+                    rl.on('close', (err) => {
+                        client.quit();
+                        if (err) {
+                            return reject({status: promisestatus.fail, 'error': err});
+                        } else {
+                            resolve({status: promisestatus.success});
                         }
-                        let doc = JSON.parse(line);
-                        requestData += `<div class="muqsith_template_div" id="${doc.checksum}">${doc.template}</div>`;
-                        client.set(doc.checksum, JSON.stringify(doc));
-                    }
+                    });
+                    rl.on('line', (line) => {
+                        totalLinesCount += 1;
+                        if (totalLinesCount >= beginCount) {
+                            count += 1;
+                            if (count >= max) {
+                                rl.pause();
+                                if (!requestMade) {
+                                    requestMade = true;
+                                    setTimeout( () => {
+                                        wikiConnector(requestData, (err, response) => {
+                                            if (response) {
+                                                response = '<html><body>'+response+'</body></html>';
+                                                let result = parseResponse(response);
+                                                console.log(`Result length ${result.length}`);
+                                                const cleanupAndProceed = function() {
+                                                    client.flushall(() => {
+                                                        requestData = '';
+                                                        count = 0;
+                                                        requestMade = false;
+                                                        rl.resume();
+                                                    });
+                                                };
+                                                let i=0;
+                                                const processResult = function(obj) {
+                                                    client.get(obj.checksum, (err, val) => {
+                                                        if (err) {
+                                                            client.quit();
+                                                            return reject({status: promisestatus.fail, 'error': err});
+                                                        } else if (val) {
+                                                            let templateObject = JSON.parse(val);
+                                                            templateObject.value = obj.html;
+
+                                                            writeStream.write(JSON.stringify(templateObject)+'\n');
+                                                            i += 1;
+                                                            if (i < result.length) {
+                                                                processResult(result[i]);
+                                                            } else {
+                                                                return cleanupAndProceed();
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                                processResult(result[i]);
+                                            } else if (err) {
+                                                client.quit();
+                                                return reject({status: promisestatus.fail, 'error': err});
+                                            }
+                                        });
+                                    }, 500);
+                                }
+                            }
+                            let doc = JSON.parse(line);
+                            requestData += `<div class="muqsith_template_div" id="${doc.checksum}">${doc.template}</div>`;
+                            client.set(doc.checksum, JSON.stringify(doc));
+                        }
+                    });
                 });
             } else {
                 client.quit();
