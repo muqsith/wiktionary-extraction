@@ -38,13 +38,32 @@ const createGetFilteredText = function() {
     let filteredlines = [];
     let captureline = false;
     let lines = text.split("\n");
+    let previousHeader = {name: '', level: -1, valid:false};
+    let headerscount = 0;
     for (let line of lines) {
       if (lib.isHeaderLine(line)) {
-        let key = lib.removeAllHeaderMarkdownSymbols(line).toLowerCase();
-        if (headersmap[key]) {
-          captureline = true;
-        } else {
-          captureline = false;
+        headerscount += 1;
+        if (headerscount > 1) {
+            let currentLevel = lib.getHeaderLevel(line);
+            let key = lib.removeAllHeaderMarkdownSymbols(line).trim().toLowerCase();
+            if (headersmap[key]) {
+                if (previousHeader.level === -1) {
+                    captureline = true;
+                } else if (currentLevel <= previousHeader.level) {
+                    captureline = true;
+                } else if ((currentLevel > previousHeader.level)
+                     && previousHeader.valid) {
+                    captureline = true;
+                } else {
+                    captureline = false;
+                }
+            } else {
+                captureline = false;
+            }
+
+            if ((previousHeader.level === -1) || (currentLevel <= previousHeader.level)) {
+                previousHeader = {'name': key, level: currentLevel, valid: headersmap[key]};
+            }
         }
       }
       if (captureline) {
@@ -62,13 +81,10 @@ function createFilteredData() {
     return new Promise((resolve, reject) => {
         if (!fs.existsSync('temp/filtered-data.json')) {
             try {
-                let readStream = fs.createReadStream("temp/data.json", { encoding: "utf8" });
                 let getFilteredText = createGetFilteredText();
-                let writeStream = fs.createWriteStream("temp/filtered-data.json", {
-                  encoding: "utf8"
-                });
                 let languagesmap = getLanguagesMap();
-
+                let readStream = fs.createReadStream("temp/data.json", { encoding: "utf8" });
+                let writeStream = fs.createWriteStream("temp/filtered-data.json", {encoding: "utf8"});
                 readStream.on("close", (err) => {
                     if (err) {
                         return reject({status: promisestatus.fail, 'error': err});
@@ -102,3 +118,12 @@ function createFilteredData() {
 }
 
 module.exports = createFilteredData;
+
+// TODO : Remove below code
+/*
+createFilteredData().then((result) => {
+    console.log(`Filtered data: ${result.status}`);
+}, ({status, error}) => {
+    console.log('Filtered data: ', status, error);
+});
+*/

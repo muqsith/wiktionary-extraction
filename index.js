@@ -2,7 +2,8 @@ const parseXml = require('./parse-xml'),
     createFilteredHeaders = require('./create-filtered-headers.js'),
     createLanguagesMap = require('./create-languages-map.js'),
     createFilteredData = require('./create-filtered-data.js'),
-    createTemplatesData = require('./create-templates-data.js')
+    createTemplatesData = require('./create-templates-data.js'),
+    fetchTemplatesValues = require('./fetch-templates-values.js')
     ;
 
 parseXml().then((result) => {
@@ -14,13 +15,18 @@ parseXml().then((result) => {
                 createFilteredData().then((result) => {
                     console.log(`Filtered data: ${result.status}`);
                     createTemplatesData().then((result) => {
-                        console.log(`Templates data: ${result.status}`);
+                        console.log(`Extract Templates data: ${result.status}`);
+                        fetchTemplatesValues().then((result) => {
+                            console.log(`Fetch Templates data: ${result.status}`);
+                        }, ({status, error}) => {
+                            console.log('Fetch Templates data: ', status, error);
+                        });
                     }, ({status, error}) => {
-                        console.log('Templates data: ', status, error);
-                    })
+                        console.log('Extract Templates data: ', status, error);
+                    });
                 }, ({status, error}) => {
                     console.log('Filtered data: ', status, error);
-                })
+                });
         }, ({status, error}) => {
             console.log('Languages map: ', status, error);
         });

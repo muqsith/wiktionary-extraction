@@ -4,7 +4,9 @@ const fs = require("fs"),
   promisestatus = require('./lib/promise-status.js'),
   KEY_WORDS = ['NOUN', 'VERB', 'PARTICIPLE', 'ARTICLE', 'PRONOUN',
              'PREPOSITION', 'ADVERB', 'CONJUNCTION', 'ADJECTIVE',
-             'INTERJECTION', 'ETYMOLOGY', 'PRONUNCIATION', 'ACRONYM', 'TRANSLATIONS']
+             'INTERJECTION', 'ETYMOLOGY', 'PRONUNCIATION', 'ACRONYM',
+             'TRANSLATIONS', 'INITIALISM', 'ABBREVIATION',
+            'USAGE NOTES']
     ;
 
 function hasKeyWords(text) {
@@ -32,8 +34,8 @@ function createFilteredHeaders() {
                                 let text_lines = o.text.split('\n');
                                 for (let textline of text_lines) {
                                     if (lib.isHeaderLine(textline)) {
-                                        let key = lib.removeAllHeaderMarkdownSymbols(textline).toLowerCase();
-                                        if (lib.hasOnlyAlphabetsAndSpace(key)
+                                        let key = lib.removeAllHeaderMarkdownSymbols(textline).trim().toLowerCase();
+                                        if (lib.hasOnlyAlphaNumeralsAndSpace(key)
                                             && hasKeyWords(key)) {
                                                 if (!headersmap[key]) {
                                                     headersmap[key] = 1;
@@ -75,3 +77,12 @@ function createFilteredHeaders() {
 };
 
 module.exports = createFilteredHeaders;
+
+// TODO : Remove below code
+/*
+createFilteredHeaders().then((result) => {
+    console.log(`Filtered headers: ${result.status}`);
+}, ({status, error}) => {
+    console.log('Filtered headers: ', status, error);
+});
+*/
