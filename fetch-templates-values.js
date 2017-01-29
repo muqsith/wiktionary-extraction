@@ -3,7 +3,9 @@ const fs = require('fs'),
     promisestatus = require('./lib/promise-status.js'),
     wikiConnector = require('./lib/wiki-api-connector.js'),
     cheerio = require('cheerio'),
-    redis = require('redis')
+    redis = require('redis'),
+    readfileGenerator = require('./lib/readfile-generator.js').readfileGenerator,
+    utils = require('./lib/utils.js')
     ;
 
 const sanitizeHtmlBlock = function(htmlText) {
@@ -35,150 +37,173 @@ const parseResponse = function (response) {
     return arr;
 };
 
-function getTotalLinesFromBothFiles(inputFile, outputFile) {
+let saveResponseDocs = function (writeStream, docs) {
     return new Promise((resolve, reject) => {
-        let result = {inputLines: 0, outputLines: 0};
-        let templatesStream = fs.createReadStream(inputFile, {encoding:'utf8'});
-        let templateStreamRL = readline.createInterface({input: templatesStream});
-        let inputFileLinesCount = 0;
-        templateStreamRL.on('line', (line) => {
-            if (line) inputFileLinesCount += 1;
-        });
-        templateStreamRL.on('close', (err) => {
-            if (err) {
-                return reject(err);
-            }
-
-            result.inputLines = inputFileLinesCount;
-
-            if (fs.existsSync(outputFile)) {
-                let templatesValueStream = fs.createReadStream(outputFile, {encoding:'utf8'});
-                let templatesValueStreamRL = readline.createInterface({input: templatesValueStream});
-                let outputFileLinesCount = 0;
-                templatesValueStreamRL.on('line', (line) => {
-                    if (line) outputFileLinesCount += 1;
-                });
-
-                templatesValueStreamRL.on('close', (err) => {
+        getRedisClient(false).then(({status, client}) => {
+            let index = 0;
+            const processResult = function(obj) {
+                client.get(obj.checksum, (err, val) => {
                     if (err) {
-                        return reject(err);
+                        client.quit();
+                        return reject({status: promisestatus.fail, 'error': err});
+                    } else if (val) {
+                        let templateObject = JSON.parse(val);
+                        templateObject.value = obj.html;
+                        writeStream.write(JSON.stringify(templateObject)+'\n');
+                        index += 1;
+                        if (index < docs.length) {
+                            processResult(docs[index]);
+                        } else {
+                            client.quit();
+                            resolve({status: promisestatus.success});
+                        }
                     }
-                    result.outputLines = outputFileLinesCount;
-                    resolve(result);
                 });
-            } else {
-                resolve(result);
+            }
+            processResult(docs[index]);
+        }, ({status, error}) => {
+            return reject({status: promisestatus.fail, 'error': error});
+        });
+    });
+};
+
+const makeRequest = function (requestData) {
+    return new Promise((resolve, reject) => {
+        wikiConnector(requestData, (err, response) => {
+            if (response) {
+                response = '<html><body>'+response+'</body></html>';
+                let result = parseResponse(response);
+                console.log(`Response docs length ${result.length}.`);
+                resolve({status: promisestatus.success, 'response': result});
+            } else if (err) {
+                return reject({status: promisestatus.fail, 'error': err});
             }
         });
     });
 };
 
-function fetchTemplatesValues(inputFile, outputFile, docsPerRequest) {
+const getRequestData = function (inputArray) {
     return new Promise((resolve, reject) => {
-        getTotalLinesFromBothFiles(inputFile, outputFile).then( (fileLinesObject) => {
-            console.log(fileLinesObject);
-            if (fileLinesObject.inputLines > fileLinesObject.outputLines) {
-                let beginCount = 0;
-                let max = (docsPerRequest) ? docsPerRequest : 500;
-                let writeStream = undefined;
-                if (fileLinesObject.outputLines > 2) {
-                    beginCount = fileLinesObject.outputLines - 2;
-                    if ((fileLinesObject.inputLines - fileLinesObject.outputLines) < max) {
-                        max = fileLinesObject.inputLines - fileLinesObject.outputLines;
-                    }
-                    writeStream = fs.createWriteStream(outputFile, {encoding:'utf8', flags: 'a'});
-                } else {
-                    writeStream = fs.createWriteStream(outputFile, {encoding:'utf8'});
-                }
-                let totalLinesCount = 0;
-                console.log(`Begining from line ${beginCount} in ${inputFile}`);
-                let count = 0;
-                let requestData = '';
-                let readStream = fs.createReadStream(inputFile, {encoding:'utf8'});
-
-                let rl = readline.createInterface({input: readStream});
-
-                let requestMade = false;
-
-                let client = redis.createClient();
-                client.on('error', (err) => {
-                    if (err) {
+        let requestdata = '';
+        getRedisClient(true).then(({status, client}) => {
+            let index = 0;
+            function processRecord(line) {
+                let doc = JSON.parse(line);
+                requestdata += `<div class="muqsith_template_div" id="${doc.checksum}">${doc.template}</div>`;
+                client.set(doc.checksum, JSON.stringify(doc), (err, res) => {
+                    index += 1;
+                    if (index < inputArray.length) {
+                        processRecord(inputArray[index]);
+                    } else {
                         client.quit();
+                        resolve({status: promisestatus.success, 'requestdata': requestdata});
+                    }
+                });
+            };
+            processRecord(inputArray[index]);
+        }, ({status, error}) => {
+            return reject({status: promisestatus.fail, 'error': error});
+        });
+    });
+}
+
+const getRedisClient = function (flush) {
+    return new Promise((resolve, reject) => {
+        let client = redis.createClient();
+        client.on('error', (err) => {
+            if (err) {
+                client.quit();
+                return reject({status: promisestatus.fail, 'error': err});
+            }
+        });
+
+        if (flush) {
+            client.flushall(() => {
+                console.log('Flushed redis');
+                resolve({status: promisestatus.success, 'client':client});
+            });
+        } else {
+            resolve({status: promisestatus.success, 'client':client});
+        }
+    });
+};
+
+const getWriteStream = function (outputFile, beginCount) {
+    let writeStream = undefined;
+    if (beginCount > 0) {
+        writeStream = fs.createWriteStream(outputFile, {encoding:'utf8', flags: 'a'});
+    } else {
+        writeStream = fs.createWriteStream(outputFile, {encoding:'utf8'});
+    }
+    return writeStream;
+};
+
+function fetchTemplatesValues(inputFile, outputFile, max = 500) {
+    return new Promise((resolve, reject) => {
+        utils.getBeginingLineNumber(inputFile, outputFile, 'checksum').then( (beginingLineResult) => {
+                let beginCount = beginingLineResult.line;
+                console.log(`Begining from line ${beginCount} in ${inputFile}`);
+                let writeStream = getWriteStream(outputFile, beginCount);
+                saveResponseDocs = saveResponseDocs.bind(null, writeStream);
+                let totalcount = 0, count = 0, inputArray = [];
+                readfileGenerator(inputFile, (gen) => {
+                    const moveForward = function(next) {
+                        if (next.value) {
+                            totalcount += 1;
+                            if (totalcount >= beginCount) {
+                                count += 1;
+                                inputArray = inputArray.concat(next.value);
+                                if (count >= max) {
+                                    getRequestData(inputArray).then( ({status, requestdata}) => {
+                                        makeRequest(requestdata).then( ({status, response}) => {
+                                            saveResponseDocs(response).then( ({status}) => {
+                                                console.log(`Saving response to file: ${status}`);
+                                                count = 0;
+                                                inputArray = [];
+                                                moveForward(gen.next());
+                                            }, ({status, error}) => {
+                                                return reject({status: promisestatus.fail, 'error': error});
+                                            });
+                                        }, ({status, error}) => {
+                                            return reject({status: promisestatus.fail, 'error': error});
+                                        });
+                                    }, ({status, error}) => {
+                                        return reject({status: promisestatus.fail, 'error': error});
+                                    });
+                                } else {
+                                    moveForward(gen.next());
+                                }
+                            } else {
+                                moveForward(gen.next());
+                            }
+                        }
+                    }
+                    moveForward(gen.next())
+                }, (err) => {
+                    if (err) {
                         return reject({status: promisestatus.fail, 'error': err});
                     }
+                    if (inputArray && inputArray.length > 0) {
+                        getRequestData(inputArray).then( ({status, requestdata}) => {
+                            makeRequest(requestdata).then( ({status, response}) => {
+                                saveResponseDocs(response).then( ({status}) => {
+                                    console.log(`Saving response to file: ${status}`);
+                                    count = 0;
+                                    inputArray = [];
+                                    resolve({status: promisestatus.success});
+                                }, ({status, error}) => {
+                                    return reject({status: promisestatus.fail, 'error': error});
+                                });
+                            }, ({status, error}) => {
+                                return reject({status: promisestatus.fail, 'error': error});
+                            });
+                        }, ({status, error}) => {
+                            return reject({status: promisestatus.fail, 'error': error});
+                        });
+                    } else {
+                        resolve({status: promisestatus.success});
+                    }
                 });
-
-                client.flushall(() => {
-                    console.log('Flushed redis');
-                    rl.on('close', (err) => {
-                        client.quit();
-                        if (err) {
-                            return reject({status: promisestatus.fail, 'error': err});
-                        } else {
-                            resolve({status: promisestatus.success});
-                        }
-                    });
-                    rl.on('line', (line) => {
-                        totalLinesCount += 1;
-                        if (totalLinesCount >= beginCount) {
-                            count += 1;
-                            if (count >= max) {
-                                rl.pause();
-                                if (!requestMade) {
-                                    requestMade = true;
-                                    setTimeout( () => {
-                                        wikiConnector(requestData, (err, response) => {
-                                            if (response) {
-                                                response = '<html><body>'+response+'</body></html>';
-                                                let result = parseResponse(response);
-                                                console.log(`Result length ${result.length}`);
-                                                const cleanupAndProceed = function() {
-                                                    client.flushall(() => {
-                                                        requestData = '';
-                                                        count = 0;
-                                                        requestMade = false;
-                                                        rl.resume();
-                                                    });
-                                                };
-                                                let i=0;
-                                                const processResult = function(obj) {
-                                                    client.get(obj.checksum, (err, val) => {
-                                                        if (err) {
-                                                            client.quit();
-                                                            return reject({status: promisestatus.fail, 'error': err});
-                                                        } else if (val) {
-                                                            let templateObject = JSON.parse(val);
-                                                            templateObject.value = obj.html;
-
-                                                            writeStream.write(JSON.stringify(templateObject)+'\n');
-                                                            i += 1;
-                                                            if (i < result.length) {
-                                                                processResult(result[i]);
-                                                            } else {
-                                                                return cleanupAndProceed();
-                                                            }
-                                                        }
-                                                    });
-                                                }
-                                                processResult(result[i]);
-                                            } else if (err) {
-                                                client.quit();
-                                                return reject({status: promisestatus.fail, 'error': err});
-                                            }
-                                        });
-                                    }, 500);
-                                }
-                            }
-                            let doc = JSON.parse(line);
-                            requestData += `<div class="muqsith_template_div" id="${doc.checksum}">${doc.template}</div>`;
-                            client.set(doc.checksum, JSON.stringify(doc));
-                        }
-                    });
-                });
-            } else {
-                client.quit();
-                resolve({status: promisestatus.success});
-            }
         }, (err) => {
             return reject({status: promisestatus.fail, 'error': err});
         });
@@ -186,3 +211,12 @@ function fetchTemplatesValues(inputFile, outputFile, docsPerRequest) {
 };
 
 module.exports = fetchTemplatesValues;
+
+if (require.main === module) {
+    fetchTemplatesValues('temp/templates-sample.json', 'temp/templates-sample-values.json')
+        .then(({status}) => {
+        console.log(`Templates fetch: ${status}`);
+    }, ({status, error}) => {
+        console.log(`Templates fetch: ${status} - ${error}`);
+    })
+}
